@@ -11,17 +11,26 @@ main{max-width:750px;margin:auto}h1{margin-bottom:5px}
 .card{background:white;padding:18px;border-radius:16px;margin:15px 0;box-shadow:0 2px 10px #0001}
 input,select,button{box-sizing:border-box;width:100%;padding:14px;margin:6px 0;border-radius:10px;font-size:17px;border:1px solid #ddd}
 button{background:#172033;color:white;font-weight:bold;border:0}
+button:disabled{opacity:.45}
 .secondary{background:#e8edf5;color:#172033}
 .danger{background:#b42318}
-.actions{display:flex;gap:8px;margin-top:8px}
-.actions button{flex:1}
+.actions{display:flex;gap:8px;margin-top:8px}.actions button{flex:1}
 .item{padding:12px 0;border-bottom:1px solid #eee}
 small{color:#687386}
+.clock{text-align:center;font-size:40px;font-weight:700;font-variant-numeric:tabular-nums;padding:15px 0}
 </style>
 </head>
 <body><main>
 <h1>⏱ StundenPro</h1>
 <p>Meine Kunden und Arbeitsstunden</p>
+<div class="card">
+<h2>Stoppuhr</h2>
+<select id="timerCustomer"></select>
+<div id="clock" class="clock">00:00:00</div>
+<div id="timerInfo"></div>
+<button id="startBtn" onclick="startTimer()">▶ Start</button>
+<button id="stopBtn" class="danger" onclick="stopTimer()">■ Stopp und speichern</button>
+</div>
 <div class="card">
 <h2>Kunde anlegen</h2>
 <input id="name" placeholder="Kundenname">
@@ -29,7 +38,7 @@ small{color:#687386}
 <button onclick="addCustomer()">Kunde speichern</button>
 </div>
 <div class="card">
-<h2>Stunden erfassen</h2>
+<h2>Stunden manuell erfassen</h2>
 <select id="customer"></select>
 <input id="date" type="date">
 <input id="hours" type="number" step="0.25" placeholder="Arbeitsstunden">
@@ -46,16 +55,17 @@ small{color:#687386}
 </div>
 </main>
 <script>
-const key="stundenpro-v1";
-let data;
+const key="stundenpro-v1",timerKey="stundenpro-timer-v1";
+let data,timer;
 try{data=JSON.parse(localStorage.getItem(key))||{customers:[],entries:[]}}catch(e){data={customers:[],entries:[]}}
+try{timer=JSON.parse(localStorage.getItem(timerKey))}catch(e){timer=null}
 if(!Array.isArray(data.customers))data.customers=[];
 if(!Array.isArray(data.entries))data.entries=[];
 const euro=n=>new Intl.NumberFormat("de-DE",{style:"currency",currency:"EUR"}).format(n);
 const safe=s=>String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const dateInput=document.getElementById("date");
-const now=new Date();
-dateInput.value=now.getFullYear()+"-"+String(now.getMonth()+1).padStart(2,"0")+"-"+String(now.getDate()).padStart(2,"0");
+function localDate(t){const d=new Date(t);return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0")}
+dateInput.value=localDate(Date.now());
 function save(){localStorage.setItem(key,JSON.stringify(data));render()}
 function addCustomer(){
 const n=document.getElementById("name").value.trim(),raw=document.getElementById("rate").value,r=Number(raw);
@@ -67,6 +77,26 @@ const id=document.getElementById("customer").value,c=data.customers.find(x=>x.id
 if(!c||!d||!Number.isFinite(h)||h<=0)return alert("Bitte Kunde, Datum und Stunden eingeben.");
 data.entries.push({id:Date.now().toString()+Math.random(),customerId:id,date:d,hours:h,rate:c.rate,note:document.getElementById("note").value});
 document.getElementById("hours").value="";document.getElementById("note").value="";save()}
+function startTimer(){
+if(timer)return;
+const id=document.getElementById("timerCustomer").value,c=data.customers.find(x=>x.id===id);
+if(!c)return alert("Bitte zuerst einen Kunden anlegen und auswählen.");
+timer={customerId:id,started:Date.now(),rate:c.rate};
+localStorage.setItem(timerKey,JSON.stringify(timer));render()}
+function stopTimer(){
+if(!timer)return;
+const ended=Date.now(),elapsed=Math.max(0,ended-timer.started);
+if(elapsed<1000)return alert("Bitte mindestens eine Sekunde warten.");
+const c=data.customers.find(x=>x.id===timer.customerId);
+if(!confirm("Arbeitszeit von "+(elapsed/3600000).toFixed(3).replace(".",",")+" Stunden für "+(c?.name||"Kunde")+" speichern?"))return;
+data.entries.push({id:Date.now().toString()+Math.random(),customerId:timer.customerId,date:localDate(timer.started),hours:elapsed/3600000,rate:timer.rate,note:"Stoppuhr"});
+save();
+timer=null;localStorage.removeItem(timerKey);render()}
+function tick(){
+const clock=document.getElementById("clock");
+let sec=timer?Math.max(0,Math.floor((Date.now()-timer.started)/1000)):0;
+const h=Math.floor(sec/3600),m=Math.floor(sec%3600/60),s=sec%60;
+clock.textContent=[h,m,s].map(x=>String(x).padStart(2,"0")).join(":")}
 function editEntry(id){
 const e=data.entries.find(x=>x.id===id);if(!e)return;
 const hours=prompt("Arbeitsstunden ändern:",e.hours);
@@ -80,36 +110,40 @@ function deleteEntry(id){
 if(!confirm("Diesen Zeiteintrag wirklich löschen?"))return;
 data.entries=data.entries.filter(x=>x.id!==id);save()}
 function backup(){
-const blob=new Blob([JSON.stringify(data,null,2)],{type:"application/json"});
-const url=URL.createObjectURL(blob);
-const a=document.createElement("a");
-a.href=url;a.download="StundenPro-Sicherung-"+new Date().toISOString().slice(0,10)+".json";
+const blob=new Blob([JSON.stringify({customers:data.customers,entries:data.entries,activeTimer:timer},null,2)],{type:"application/json"});
+const url=URL.createObjectURL(blob),a=document.createElement("a");
+a.href=url;a.download="StundenPro-Sicherung-"+localDate(Date.now())+".json";
 document.body.appendChild(a);a.click();a.remove();
 setTimeout(()=>URL.revokeObjectURL(url),1000)}
 function render(){
-const select=document.getElementById("customer"),selected=select.value;
-select.innerHTML=data.customers.map(c=>'<option value="'+safe(c.id)+'">'+safe(c.name)+'</option>').join("");
-if(data.customers.some(c=>c.id===selected))select.value=selected;
+const selected=document.getElementById("customer").value;
+const timerSelect=document.getElementById("timerCustomer"),timerSelected=timerSelect.value;
+const opts=data.customers.map(c=>'<option value="'+safe(c.id)+'">'+safe(c.name)+'</option>').join("");
+document.getElementById("customer").innerHTML=opts;
+if(data.customers.some(c=>c.id===selected))document.getElementById("customer").value=selected;
+timerSelect.innerHTML=opts;
+if(data.customers.some(c=>c.id===timerSelected))timerSelect.value=timerSelected;
+if(timer)timerSelect.value=timer.customerId;
+timerSelect.disabled=!!timer;
+document.getElementById("startBtn").disabled=!!timer||!data.customers.length;
+document.getElementById("stopBtn").disabled=!timer;
+document.getElementById("timerInfo").textContent=timer?"Läuft seit "+new Date(timer.started).toLocaleString("de-DE"):"Noch keine Zeitmessung gestartet";
 document.getElementById("customers").innerHTML=data.customers.map(c=>'<div class="item">'+safe(c.name)+' – '+euro(c.rate)+'/h</div>').join("")||"Noch keine Kunden";
-const entries=document.getElementById("entries");
-entries.innerHTML="";
+const entries=document.getElementById("entries");entries.innerHTML="";
 data.entries.slice().reverse().forEach(e=>{
-const c=data.customers.find(x=>x.id===e.customerId);
-const item=document.createElement("div");item.className="item";
-item.innerHTML='<b>'+safe(c?.name||"Unbekannt")+'</b><br><small>'+safe(e.date)+' · '+Number(e.hours)+' h · '+safe(e.note||"")+'</small><br>'+euro(e.hours*e.rate);
+const c=data.customers.find(x=>x.id===e.customerId),item=document.createElement("div");
+item.className="item";
+item.innerHTML='<b>'+safe(c?.name||"Unbekannt")+'</b><br><small>'+safe(e.date)+' · '+Number(e.hours).toFixed(2).replace(".",",")+' h · '+safe(e.note||"")+'</small><br>'+euro(e.hours*e.rate);
 const actions=document.createElement("div");actions.className="actions";
 const edit=document.createElement("button");edit.className="secondary";edit.textContent="✏️ Bearbeiten";edit.onclick=()=>editEntry(e.id);
 const del=document.createElement("button");del.className="danger";del.textContent="🗑️ Löschen";del.onclick=()=>deleteEntry(e.id);
 actions.append(edit,del);item.append(actions);entries.append(item)});
 if(!data.entries.length)entries.textContent="Noch keine Einträge";
-const h=data.entries.reduce((s,e)=>s+Number(e.hours),0);
-const r=data.entries.reduce((s,e)=>s+Number(e.hours)*Number(e.rate),0);
+const h=data.entries.reduce((s,e)=>s+Number(e.hours),0),r=data.entries.reduce((s,e)=>s+Number(e.hours)*Number(e.rate),0);
 document.getElementById("summary").textContent="Gesamt: "+h.toFixed(2).replace(".",",")+" Stunden · "+euro(r);
-const month=new Date().getFullYear()+"-"+String(new Date().getMonth()+1).padStart(2,"0");
-const current=data.entries.filter(e=>e.date&&e.date.startsWith(month));
-const mh=current.reduce((s,e)=>s+Number(e.hours),0);
-const mr=current.reduce((s,e)=>s+Number(e.hours)*Number(e.rate),0);
+const month=localDate(Date.now()).slice(0,7),current=data.entries.filter(e=>e.date&&e.date.startsWith(month));
+const mh=current.reduce((s,e)=>s+Number(e.hours),0),mr=current.reduce((s,e)=>s+Number(e.hours)*Number(e.rate),0);
 document.getElementById("monthly").textContent="Dieser Monat: "+mh.toFixed(2).replace(".",",")+" Stunden · "+euro(mr);
-}
-render();
+tick()}
+render();setInterval(tick,1000);
 </script></body></html>
