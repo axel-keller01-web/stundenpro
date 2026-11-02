@@ -64,8 +64,11 @@ small{color:#687386}
 <div class="card"><h2>Zeiteinträge</h2><div id="entries"></div></div>
 <div class="card">
 <h2>Datensicherung</h2>
-<p><small>Speichere regelmäßig eine Sicherung in der Dateien-App.</small></p>
+<p><small>Speichere regelmäßig eine Sicherung in iCloud Drive.</small></p>
 <button class="secondary" onclick="backup()">Sicherung herunterladen</button>
+<h3>Sicherung wiederherstellen</h3>
+<p><small>Wähle eine StundenPro-Sicherungsdatei aus. Beim Wiederherstellen werden die aktuellen Kunden und Zeiteinträge ersetzt. Vorher erscheint eine Sicherheitsabfrage.</small></p>
+<input id="restoreFile" type="file" accept=".json,application/json" onchange="restoreBackup(event)">
 </div>
 </main>
 <script>
@@ -128,6 +131,25 @@ const url=URL.createObjectURL(blob),a=document.createElement("a");
 a.href=url;a.download="StundenPro-Sicherung-"+localDate(Date.now())+".json";
 document.body.appendChild(a);a.click();a.remove();
 setTimeout(()=>URL.revokeObjectURL(url),1000)}
+async function restoreBackup(event){
+const input=event.target,file=input.files&&input.files[0];
+if(!file)return;
+try{
+const parsed=JSON.parse(await file.text());
+if(!parsed||!Array.isArray(parsed.customers)||!Array.isArray(parsed.entries))throw Error("Ungültiges Sicherungsformat");
+const validCustomers=parsed.customers.every(c=>c&&typeof c.id==="string"&&typeof c.name==="string"&&typeof c.rate==="number"&&Number.isFinite(c.rate)&&c.rate>=0);
+const ids=new Set(parsed.customers.map(c=>c.id));
+const validEntries=parsed.entries.every(e=>e&&typeof e.id==="string"&&typeof e.customerId==="string"&&ids.has(e.customerId)&&typeof e.date==="string"&&/^\d{4}-\d{2}-\d{2}$/.test(e.date)&&typeof e.hours==="number"&&Number.isFinite(e.hours)&&e.hours>0&&typeof e.rate==="number"&&Number.isFinite(e.rate)&&e.rate>=0&&(e.note===undefined||typeof e.note==="string"));
+if(!validCustomers||!validEntries)throw Error("Die Sicherung enthält ungültige Daten");
+if(!confirm("ACHTUNG: Alle aktuell gespeicherten Kunden und Zeiteinträge werden durch die Sicherung ersetzt. Möchtest du wirklich fortfahren?"))return;
+if(!confirm("Letzte Bestätigung: Wirklich die aktuellen Daten überschreiben?"))return;
+const restored={customers:parsed.customers,entries:parsed.entries};
+localStorage.setItem(key,JSON.stringify(restored));
+localStorage.removeItem(timerKey);
+data=restored;timer=null;
+render();alert("Sicherung erfolgreich wiederhergestellt.");
+}catch(err){alert("Die Sicherung konnte nicht wiederhergestellt werden: "+err.message)}
+finally{input.value=""}}
 function renderMonth(){
 const month=document.getElementById("month").value;
 const current=data.entries.filter(e=>e.date&&e.date.slice(0,7)===month);
