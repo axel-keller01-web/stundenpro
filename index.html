@@ -18,6 +18,9 @@ button:disabled{opacity:.45}
 .item{padding:12px 0;border-bottom:1px solid #eee}
 small{color:#687386}
 .clock{text-align:center;font-size:40px;font-weight:700;font-variant-numeric:tabular-nums;padding:15px 0}
+.stats{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.stat{background:#f3f5f9;border-radius:12px;padding:14px}
+.stat strong{display:block;font-size:22px;margin-top:6px}
 </style>
 </head>
 <body><main>
@@ -45,7 +48,18 @@ small{color:#687386}
 <input id="note" placeholder="Beschreibung">
 <button onclick="addTime()">Stunden speichern</button>
 </div>
-<div class="card"><h2>Übersicht</h2><div id="summary"></div><div id="monthly"></div></div>
+<div class="card">
+<h2>Monatsübersicht</h2>
+<label for="month">Monat auswählen</label>
+<input id="month" type="month" onchange="renderMonth()">
+<div class="stats">
+<div class="stat">Arbeitsstunden<strong id="monthHours">0,00</strong></div>
+<div class="stat">Verdienst<strong id="monthMoney">0,00 €</strong></div>
+</div>
+<h3>Nach Kunden</h3>
+<div id="monthCustomers"></div>
+</div>
+<div class="card"><h2>Gesamtübersicht</h2><div id="summary"></div></div>
 <div class="card"><h2>Kunden</h2><div id="customers"></div></div>
 <div class="card"><h2>Zeiteinträge</h2><div id="entries"></div></div>
 <div class="card">
@@ -66,6 +80,7 @@ const safe=s=>String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;
 const dateInput=document.getElementById("date");
 function localDate(t){const d=new Date(t);return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0")}
 dateInput.value=localDate(Date.now());
+document.getElementById("month").value=localDate(Date.now()).slice(0,7);
 function save(){localStorage.setItem(key,JSON.stringify(data));render()}
 function addCustomer(){
 const n=document.getElementById("name").value.trim(),raw=document.getElementById("rate").value,r=Number(raw);
@@ -90,18 +105,16 @@ if(elapsed<1000)return alert("Bitte mindestens eine Sekunde warten.");
 const c=data.customers.find(x=>x.id===timer.customerId);
 if(!confirm("Arbeitszeit von "+(elapsed/3600000).toFixed(3).replace(".",",")+" Stunden für "+(c?.name||"Kunde")+" speichern?"))return;
 data.entries.push({id:Date.now().toString()+Math.random(),customerId:timer.customerId,date:localDate(timer.started),hours:elapsed/3600000,rate:timer.rate,note:"Stoppuhr"});
-save();
-timer=null;localStorage.removeItem(timerKey);render()}
+save();timer=null;localStorage.removeItem(timerKey);render()}
 function tick(){
-const clock=document.getElementById("clock");
 let sec=timer?Math.max(0,Math.floor((Date.now()-timer.started)/1000)):0;
 const h=Math.floor(sec/3600),m=Math.floor(sec%3600/60),s=sec%60;
-clock.textContent=[h,m,s].map(x=>String(x).padStart(2,"0")).join(":")}
+document.getElementById("clock").textContent=[h,m,s].map(x=>String(x).padStart(2,"0")).join(":")}
 function editEntry(id){
 const e=data.entries.find(x=>x.id===id);if(!e)return;
 const hours=prompt("Arbeitsstunden ändern:",e.hours);
 if(hours===null)return;
-const h=Number(hours.replace(",","."));
+const h=Number(String(hours).replace(",","."));
 if(!Number.isFinite(h)||h<=0)return alert("Bitte eine gültige Stundenzahl eingeben.");
 const note=prompt("Beschreibung ändern:",e.note||"");
 if(note===null)return;
@@ -115,6 +128,26 @@ const url=URL.createObjectURL(blob),a=document.createElement("a");
 a.href=url;a.download="StundenPro-Sicherung-"+localDate(Date.now())+".json";
 document.body.appendChild(a);a.click();a.remove();
 setTimeout(()=>URL.revokeObjectURL(url),1000)}
+function renderMonth(){
+const month=document.getElementById("month").value;
+const current=data.entries.filter(e=>e.date&&e.date.slice(0,7)===month);
+const mh=current.reduce((s,e)=>s+Number(e.hours),0);
+const mr=current.reduce((s,e)=>s+Number(e.hours)*Number(e.rate),0);
+document.getElementById("monthHours").textContent=mh.toFixed(2).replace(".",",")+" h";
+document.getElementById("monthMoney").textContent=euro(mr);
+const byCustomer=new Map();
+current.forEach(e=>{
+const id=e.customerId;
+const old=byCustomer.get(id)||{hours:0,money:0};
+old.hours+=Number(e.hours);old.money+=Number(e.hours)*Number(e.rate);
+byCustomer.set(id,old)});
+const target=document.getElementById("monthCustomers");target.innerHTML="";
+byCustomer.forEach((totals,id)=>{
+const c=data.customers.find(x=>x.id===id),item=document.createElement("div");
+item.className="item";
+item.innerHTML="<b>"+safe(c?.name||"Unbekannt")+"</b><br>"+totals.hours.toFixed(2).replace(".",",")+" Stunden · "+euro(totals.money);
+target.appendChild(item)});
+if(!byCustomer.size)target.textContent="Für diesen Monat sind noch keine Stunden eingetragen."}
 function render(){
 const selected=document.getElementById("customer").value;
 const timerSelect=document.getElementById("timerCustomer"),timerSelected=timerSelect.value;
@@ -141,9 +174,6 @@ actions.append(edit,del);item.append(actions);entries.append(item)});
 if(!data.entries.length)entries.textContent="Noch keine Einträge";
 const h=data.entries.reduce((s,e)=>s+Number(e.hours),0),r=data.entries.reduce((s,e)=>s+Number(e.hours)*Number(e.rate),0);
 document.getElementById("summary").textContent="Gesamt: "+h.toFixed(2).replace(".",",")+" Stunden · "+euro(r);
-const month=localDate(Date.now()).slice(0,7),current=data.entries.filter(e=>e.date&&e.date.startsWith(month));
-const mh=current.reduce((s,e)=>s+Number(e.hours),0),mr=current.reduce((s,e)=>s+Number(e.hours)*Number(e.rate),0);
-document.getElementById("monthly").textContent="Dieser Monat: "+mh.toFixed(2).replace(".",",")+" Stunden · "+euro(mr);
-tick()}
+renderMonth();tick()}
 render();setInterval(tick,1000);
 </script></body></html>
